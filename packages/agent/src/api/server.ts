@@ -6,7 +6,6 @@ import { parseStatusLinePayload } from "../provider/statusline-hook.ts";
 import { latestSnapshot, recentSnapshots, recentResetEvents, averageUtilization } from "../storage/snapshots.ts";
 import { recentNotifications } from "../storage/notifications-log.ts";
 import { createTask, listTasks, completeTask, updateTask, deleteTask, nextRecommendedTask } from "../storage/tasks.ts";
-import { getSettingJson, setSettingJson } from "../storage/settings.ts";
 import type { UsageKind } from "../provider/types.ts";
 import {
   getCurrentSession,
@@ -207,15 +206,6 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
   app.delete("/api/tasks/:id", (req, res) => {
     const ok = deleteTask(db, Number(req.params.id));
     res.status(ok ? 204 : 404).end();
-  });
-
-  app.get("/api/settings", (_req, res) => {
-    res.json(getSettingJson(db, "notification_config", {}));
-  });
-
-  app.put("/api/settings", (req, res) => {
-    setSettingJson(db, "notification_config", req.body ?? {});
-    res.json({ ok: true });
   });
 
   app.post("/api/notify/test", async (_req, res) => {

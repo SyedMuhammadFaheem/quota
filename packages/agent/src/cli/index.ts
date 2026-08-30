@@ -1,5 +1,4 @@
 import { Command } from "commander";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +7,7 @@ import { openDb } from "../storage/db.ts";
 import { setSetting } from "../storage/settings.ts";
 import { createTask, listTasks, completeTask, deleteTask } from "../storage/tasks.ts";
 import { writeEnvFile, loadEnvFile, ENV_PATH, AGENT_PORT } from "../config.ts";
-import { generatePlist, plistPath, logDir } from "../launchd/plist.ts";
+import { installAutostart, startAutostart, stopAutostart, isAutostartInstalled } from "../platform/index.ts";
 import { formatCountdown, fetchJson } from "@quota/shared";
 
 const AGENT_BASE = `http://127.0.0.1:${AGENT_PORT}`;
@@ -113,23 +112,26 @@ async function cmdSetup() {
   const ntfyServer = ntfyTopic ? await ask("ntfy server [https://ntfy.sh]: ") : "";
   const telegramBotToken = await ask("Telegram bot token (leave blank to skip): ");
   const telegramChatId = telegramBotToken ? await ask("Telegram chat id: ") : "";
-  const macAnswer = await ask("Enable macOS notifications? [Y/n]: ");
+  const desktopAnswer = await ask("Enable desktop notifications? [Y/n]: ");
 
   writeEnvFile({
     NTFY_TOPIC: ntfyTopic || existing.NTFY_TOPIC || "",
     NTFY_SERVER: ntfyServer || existing.NTFY_SERVER || "",
     TELEGRAM_BOT_TOKEN: telegramBotToken || existing.TELEGRAM_BOT_TOKEN || "",
     TELEGRAM_CHAT_ID: telegramChatId || existing.TELEGRAM_CHAT_ID || "",
-    MAC_NOTIFICATIONS: /^n/i.test(macAnswer) ? "false" : "true",
+    OS_NOTIFICATIONS: /^n/i.test(desktopAnswer) ? "false" : "true",
   });
   console.log(`Saved notification config to ${ENV_PATH}`);
 
   installStatusLine();
   installSessionHooks();
 
-  const launchd = await ask("Install a launchd agent so quota starts automatically at login? [Y/n]: ");
+  const autostart = await ask("Install an autostart agent so quota starts automatically at login? [Y/n]: ");
   rl.close();
-  if (!/^n/i.test(launchd)) installLaunchd();
+  if (!/^n/i.test(autostart)) {
+    const result = installAutostart(process.execPath, entryScriptPath());
+    console.log(result.message);
+  }
 
   console.log("\nSetup complete. Run `quota start` to launch the agent, `quota status` to check usage.");
   process.exit(0);
@@ -194,38 +196,29 @@ function installSessionHooks() {
   console.log(`Installed automatic session capture (Stop/SessionEnd hooks) in ${CLAUDE_SETTINGS_PATH}`);
 }
 
-function installLaunchd() {
-  const nodePath = process.execPath;
-  const entryScript = path.resolve(import.meta.dirname, "..", "..", "bin", "quota.ts");
-  fs.mkdirSync(logDir(), { recursive: true });
-  fs.mkdirSync(path.dirname(plistPath()), { recursive: true });
-  fs.writeFileSync(plistPath(), generatePlist(nodePath, entryScript));
-  console.log(`Wrote launchd plist to ${plistPath()}`);
-  try {
-    execFileSync("launchctl", ["load", plistPath()]);
-    console.log("Loaded launchd agent (starts automatically at login).");
-  } catch (err) {
-    console.warn(`launchctl load failed: ${(err as Error).message}`);
-  }
+function entryScriptPath(): string {
+  return path.resolve(import.meta.dirname, "..", "..", "bin", "quota.ts");
 }
 
 function cmdStart() {
-  if (fs.existsSync(plistPath())) {
-    execFileSync("launchctl", ["load", plistPath()], { stdio: "inherit" });
-    console.log("Started via launchd.");
+  if (isAutostartInstalled()) {
+    const result = startAutostart(process.execPath, entryScriptPath());
+    console.log(result.message);
+    if (!result.ok) process.exitCode = 1;
     return;
   }
-  console.log("No launchd agent installed (run `quota setup` first). Starting in the foreground...");
+  console.log("No autostart agent installed (run `quota setup` first). Starting in the foreground...");
   import("../index.ts").then((m) => m.startAgent());
 }
 
 function cmdStop() {
-  if (fs.existsSync(plistPath())) {
-    execFileSync("launchctl", ["unload", plistPath()], { stdio: "inherit" });
-    console.log("Stopped launchd agent.");
+  if (isAutostartInstalled()) {
+    const result = stopAutostart();
+    console.log(result.message);
+    if (!result.ok) process.exitCode = 1;
     return;
   }
-  console.log(`No launchd agent installed. If quota is running in the foreground, press Ctrl+C there.`);
+  console.log(`No autostart agent installed. If quota is running in the foreground, press Ctrl+C there.`);
 }
 
 async function cmdNotifyTest() {

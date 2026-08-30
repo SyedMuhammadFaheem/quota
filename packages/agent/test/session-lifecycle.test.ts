@@ -41,7 +41,7 @@ function fakeClock(start: number) {
 test("hitting 100% interrupts the active session, and the matching reset makes it ready to resume", async () => {
   const db = openDb(":memory:");
   const clock = fakeClock(1_000_000);
-  const notifier = new Notifier(db, { macNotifications: false });
+  const notifier = new Notifier(db, { osNotifications: false });
   const sentMessages: string[] = [];
   const originalSend = notifier.send.bind(notifier);
   notifier.send = async (message: string, triggerKey: string) => {
@@ -101,7 +101,7 @@ test("hitting 100% interrupts the active session, and the matching reset makes i
 test("hitting 100% on the seven_day window also interrupts and resumes the session (not just five_hour)", async () => {
   const db = openDb(":memory:");
   const clock = fakeClock(1_000_000);
-  const notifier = new Notifier(db, { macNotifications: false });
+  const notifier = new Notifier(db, { osNotifications: false });
 
   startSession(db, "Redis Pattern Profiler", "Implementing pattern detection");
 

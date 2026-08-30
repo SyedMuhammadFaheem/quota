@@ -1,8 +1,8 @@
 import type Database from "better-sqlite3";
 import type { UsageKind, UsageSnapshot } from "../provider/types.ts";
+import { USAGE_KINDS } from "../provider/types.ts";
 import { insertSnapshot, latestSnapshot, recordResetEvent } from "../storage/snapshots.ts";
 
-const KINDS: UsageKind[] = ["five_hour", "seven_day"];
 const DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1; // setTimeout's max delay
 
@@ -48,7 +48,7 @@ export class Scheduler {
 
   /** Call on startup: reconstructs alarms from persisted snapshots (survives restart). */
   start(): void {
-    for (const kind of KINDS) {
+    for (const kind of USAGE_KINDS) {
       const snapshot = latestSnapshot(this.db, kind);
       if (snapshot?.resets_at) this.scheduleReset(kind, snapshot.resets_at);
     }

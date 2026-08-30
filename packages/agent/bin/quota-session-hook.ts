@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { extractSessionContext, type SessionHookInput } from "../src/provider/session-context.ts";
 import { openDb } from "../src/storage/db.ts";
-import { getCurrentSession, startSession, updateSession, appendNote, appendNextTask } from "../src/storage/sessions.ts";
+import { applySessionActivity, type SessionActivityUpdate } from "../src/storage/sessions.ts";
 import { AGENT_PORT } from "../src/config.ts";
-import path from "node:path";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -27,18 +26,9 @@ async function pushToRunningAgent(body: unknown): Promise<boolean> {
   }
 }
 
-function writeDirectly(update: { statusText?: string; note?: string; nextTasks?: string[] }, cwd?: string): void {
+function writeDirectly(update: SessionActivityUpdate, cwd?: string): void {
   const db = openDb();
-  let session = getCurrentSession(db);
-  if (!session) {
-    const project = cwd ? path.basename(cwd) : "Untitled session";
-    session = startSession(db, project);
-  }
-  if (update.statusText) session = updateSession(db, session.id, { statusText: update.statusText }) ?? session;
-  if (update.note) session = appendNote(db, session.id, update.note) ?? session;
-  for (const t of update.nextTasks ?? []) {
-    if (!session.nextTasks.includes(t)) session = appendNextTask(db, session.id, t) ?? session;
-  }
+  applySessionActivity(db, update, cwd);
   db.close();
 }
 

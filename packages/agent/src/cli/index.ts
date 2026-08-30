@@ -9,6 +9,7 @@ import { setSetting } from "../storage/settings.ts";
 import { createTask, listTasks, completeTask, deleteTask } from "../storage/tasks.ts";
 import { writeEnvFile, loadEnvFile, ENV_PATH, AGENT_PORT } from "../config.ts";
 import { generatePlist, plistPath, logDir } from "../launchd/plist.ts";
+import { formatCountdown, fetchJson } from "@quota/shared";
 
 const AGENT_BASE = `http://127.0.0.1:${AGENT_PORT}`;
 const STATUSLINE_BIN = "quota-statusline";
@@ -25,10 +26,8 @@ interface SessionDto {
   started_at: number;
 }
 
-async function apiGet(pathname: string) {
-  const res = await fetch(`${AGENT_BASE}${pathname}`);
-  if (!res.ok) throw new Error(`agent returned ${res.status} for ${pathname}`);
-  return res.json();
+async function apiGet(pathname: string): Promise<any> {
+  return fetchJson(`${AGENT_BASE}${pathname}`);
 }
 
 async function apiCall(method: string, pathname: string, body?: unknown) {
@@ -38,15 +37,6 @@ async function apiCall(method: string, pathname: string, body?: unknown) {
     body: body ? JSON.stringify(body) : undefined,
   });
   return res;
-}
-
-function formatCountdown(resetsAt: number | null | undefined): string {
-  if (!resetsAt) return "unknown";
-  const ms = resetsAt - Date.now();
-  if (ms <= 0) return "now";
-  const mins = Math.round(ms / 60000);
-  if (mins < 60) return `${mins}m`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 }
 
 function printSessionBrief(session: SessionDto | null) {

@@ -46,6 +46,74 @@ test("threshold crossing sends once and dedups repeat crossings of the same wind
   }
 });
 
+test("concurrent notifyThresholds calls for the same crossing only send once (claim race)", async () => {
+  const db = openDb(":memory:");
+  const notifier = new Notifier(db, { ntfy: { topic: "test" }, macNotifications: false });
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  // Simulate a slow network call: both concurrent notifyThresholds() calls reach their
+  // dedup check before either one's fetch resolves and logs the trigger.
+  globalThis.fetch = (async () => {
+    fetchCalls++;
+    await new Promise((r) => setTimeout(r, 10));
+    return new Response(null, { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const snapshot = {
+      capturedAt: 1,
+      source: "statusline" as const,
+      raw: {},
+      windows: [{ kind: "five_hour" as const, utilization: 82, resetsAt: 9999 }],
+    };
+    await Promise.all([notifier.notifyThresholds(snapshot), notifier.notifyThresholds(snapshot)]);
+    assert.equal(fetchCalls, 1, "the trigger is claimed synchronously, so only one concurrent call sends");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a threshold under an unknown resets_at renotifies on a new day instead of being suppressed forever", async () => {
+  const db = openDb(":memory:");
+  const notifier = new Notifier(db, { ntfy: { topic: "test" }, macNotifications: false });
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalls++;
+    return new Response(null, { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const day1 = Date.UTC(2026, 0, 1, 12);
+    const day2 = Date.UTC(2026, 0, 2, 12);
+    await notifier.notifyThresholds({
+      capturedAt: day1,
+      source: "statusline",
+      raw: {},
+      windows: [{ kind: "five_hour", utilization: 82, resetsAt: undefined }],
+    });
+    assert.equal(fetchCalls, 1);
+
+    await notifier.notifyThresholds({
+      capturedAt: day1 + 1000,
+      source: "statusline",
+      raw: {},
+      windows: [{ kind: "five_hour", utilization: 83, resetsAt: undefined }],
+    });
+    assert.equal(fetchCalls, 1, "still the same day and threshold -- deduped as before");
+
+    await notifier.notifyThresholds({
+      capturedAt: day2,
+      source: "statusline",
+      raw: {},
+      windows: [{ kind: "five_hour", utilization: 82, resetsAt: undefined }],
+    });
+    assert.equal(fetchCalls, 2, "a new day is a new cycle key, so it renotifies instead of staying suppressed");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("reset notification fires once per reset event", async () => {
   const db = openDb(":memory:");
   const notifier = new Notifier(db, { ntfy: { topic: "test" }, macNotifications: false });

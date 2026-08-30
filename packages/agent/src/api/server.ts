@@ -6,7 +6,7 @@ import { parseStatusLinePayload } from "../provider/statusline-hook.ts";
 import { latestSnapshot, recentSnapshots, recentResetEvents, averageUtilization } from "../storage/snapshots.ts";
 import { recentNotifications } from "../storage/notifications-log.ts";
 import { createTask, listTasks, completeTask, updateTask, deleteTask, nextRecommendedTask } from "../storage/tasks.ts";
-import type { UsageKind } from "../provider/types.ts";
+import { USAGE_KINDS, type UsageKind } from "../provider/types.ts";
 import {
   getCurrentSession,
   getSession,
@@ -17,10 +17,8 @@ import {
   appendNextTask,
   resumeSession,
   completeSession,
+  applySessionActivity,
 } from "../storage/sessions.ts";
-import path from "node:path";
-
-const KINDS: UsageKind[] = ["five_hour", "seven_day"];
 
 export interface ApiDeps {
   db: Database.Database;
@@ -43,7 +41,7 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
 
   app.get("/api/status", (_req, res) => {
     const usage = Object.fromEntries(
-      KINDS.map((kind) => {
+      USAGE_KINDS.map((kind) => {
         const snap = latestSnapshot(db, kind);
         return [
           kind,
@@ -217,24 +215,15 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
   // Auto-creates a session (named from cwd) if none is open yet.
   app.post("/api/internal/session-activity", (req, res) => {
     const { statusText, note, nextTasks, cwd } = req.body ?? {};
-    let session = getCurrentSession(db);
-    if (!session) {
-      const project = typeof cwd === "string" && cwd ? path.basename(cwd) : "Untitled session";
-      session = startSession(db, project);
-    }
-    if (typeof statusText === "string" && statusText) {
-      session = updateSession(db, session.id, { statusText }) ?? session;
-    }
-    if (typeof note === "string" && note) {
-      session = appendNote(db, session.id, note) ?? session;
-    }
-    if (Array.isArray(nextTasks)) {
-      for (const t of nextTasks) {
-        if (typeof t === "string" && t && !session.nextTasks.includes(t)) {
-          session = appendNextTask(db, session.id, t) ?? session;
-        }
-      }
-    }
+    applySessionActivity(
+      db,
+      {
+        statusText: typeof statusText === "string" && statusText ? statusText : undefined,
+        note: typeof note === "string" && note ? note : undefined,
+        nextTasks: Array.isArray(nextTasks) ? nextTasks.filter((t) => typeof t === "string" && t) : undefined,
+      },
+      typeof cwd === "string" && cwd ? cwd : undefined,
+    );
     res.status(204).end();
   });
 

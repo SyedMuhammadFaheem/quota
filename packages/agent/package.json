@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@quota/shared": "*",
     "better-sqlite3": "^11.9.1",
     "express": "^4.21.2",
     "commander": "^12.1.0"

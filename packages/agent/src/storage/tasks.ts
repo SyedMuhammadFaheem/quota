@@ -9,11 +9,17 @@ export interface Task {
   completed_at: number | null;
 }
 
+/** Runs an INSERT/UPDATE with a `RETURNING *` clause and returns the row in one round trip. */
+function mutateReturning(db: Database.Database, sql: string, params: unknown[]): Task | undefined {
+  return db.prepare(sql).get(...params) as Task | undefined;
+}
+
 export function createTask(db: Database.Database, title: string, priority = 0): Task {
-  const info = db
-    .prepare("INSERT INTO tasks (title, priority, status, created_at) VALUES (?, ?, 'pending', ?)")
-    .run(title, priority, Date.now());
-  return getTask(db, Number(info.lastInsertRowid))!;
+  return mutateReturning(
+    db,
+    "INSERT INTO tasks (title, priority, status, created_at) VALUES (?, ?, 'pending', ?) RETURNING *",
+    [title, priority, Date.now()],
+  )!;
 }
 
 export function getTask(db: Database.Database, id: number): Task | undefined {
@@ -38,11 +44,11 @@ export function nextRecommendedTask(db: Database.Database): Task | undefined {
 }
 
 export function completeTask(db: Database.Database, id: number): Task | undefined {
-  db.prepare("UPDATE tasks SET status = 'done', completed_at = ? WHERE id = ?").run(
-    Date.now(),
-    id,
+  return mutateReturning(
+    db,
+    "UPDATE tasks SET status = 'done', completed_at = ? WHERE id = ? RETURNING *",
+    [Date.now(), id],
   );
-  return getTask(db, id);
 }
 
 export function updateTask(
@@ -52,12 +58,11 @@ export function updateTask(
 ): Task | undefined {
   const current = getTask(db, id);
   if (!current) return undefined;
-  db.prepare("UPDATE tasks SET title = ?, priority = ? WHERE id = ?").run(
-    fields.title ?? current.title,
-    fields.priority ?? current.priority,
-    id,
+  return mutateReturning(
+    db,
+    "UPDATE tasks SET title = ?, priority = ? WHERE id = ? RETURNING *",
+    [fields.title ?? current.title, fields.priority ?? current.priority, id],
   );
-  return getTask(db, id);
 }
 
 export function deleteTask(db: Database.Database, id: number): boolean {

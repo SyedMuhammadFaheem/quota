@@ -9,7 +9,7 @@ import { markInterrupted, markReadyToResume } from "../src/storage/sessions.ts";
 
 async function withServer(fn: (base: string, db: Database.Database) => Promise<void>) {
   const db = openDb(":memory:");
-  const notifier = new Notifier(db, { osNotifications: false });
+  const notifier = new Notifier(db, { macNotifications: false });
   const app = createApp({ db, notifier });
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));

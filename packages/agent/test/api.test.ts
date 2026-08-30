@@ -8,7 +8,7 @@ import { insertSnapshot } from "../src/storage/snapshots.ts";
 
 async function withServer(fn: (base: string) => Promise<void>) {
   const db = openDb(":memory:");
-  const notifier = new Notifier(db, { osNotifications: false });
+  const notifier = new Notifier(db, { macNotifications: false });
   const app = createApp({ db, notifier });
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -97,7 +97,7 @@ test("state persists across a simulated agent restart (reopen the same db file)"
   db.close();
 
   db = openDb(dbFile);
-  const notifier = new Notifier(db, { osNotifications: false });
+  const notifier = new Notifier(db, { macNotifications: false });
   const app = createApp({ db, notifier });
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));

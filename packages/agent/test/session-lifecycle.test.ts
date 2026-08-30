@@ -3,12 +3,8 @@ import assert from "node:assert/strict";
 import { openDb } from "../src/storage/db.ts";
 import { Scheduler } from "../src/scheduler/scheduler.ts";
 import { Notifier } from "../src/notifications/notifier.ts";
-import {
-  startSession,
-  getCurrentSession,
-  markInterrupted,
-  markReadyToResume,
-} from "../src/storage/sessions.ts";
+import { buildSchedulerCallbacks } from "../src/index.ts";
+import { startSession, getCurrentSession, markInterrupted, markReadyToResume } from "../src/storage/sessions.ts";
 
 function fakeClock(start: number) {
   let time = start;
@@ -55,6 +51,7 @@ test("hitting 100% interrupts the active session, and the matching reset makes i
 
   startSession(db, "Redis Pattern Profiler", "Implementing pattern detection");
 
+  const callbacks = buildSchedulerCallbacks(db, notifier);
   const resets: string[] = [];
   const scheduler = new Scheduler({
     db,
@@ -65,17 +62,9 @@ test("hitting 100% interrupts the active session, and the matching reset makes i
     pollIntervalMs: 999_999_999,
     onReset: (kind) => {
       resets.push(kind);
-      const current = getCurrentSession(db);
-      const updated = current && kind === "five_hour" ? markReadyToResume(db, current.id, kind) : undefined;
-      void notifier.notifyReset(kind, clock.now(), updated);
+      callbacks.onReset(kind);
     },
-    onSnapshot: (snapshot) => {
-      const fiveHour = snapshot.windows.find((w) => w.kind === "five_hour");
-      if (fiveHour && fiveHour.utilization >= 100) {
-        const current = getCurrentSession(db);
-        if (current) markInterrupted(db, current.id, "five_hour", "Claude 5-hour limit reached");
-      }
-    },
+    onSnapshot: callbacks.onSnapshot,
   });
   scheduler.start();
 
@@ -100,10 +89,55 @@ test("hitting 100% interrupts the active session, and the matching reset makes i
   assert.ok(readyToResume.reset_at);
 
   // The reset notification should read as a Resume Brief, not a bare "reset" ping.
+  // (A threshold-crossing notification also fires on the 100% snapshot itself, via
+  // the now-wired-up notifyThresholds -- that's an additional, earlier message.)
   await new Promise((r) => setTimeout(r, 10));
-  assert.equal(sentMessages.length, 1);
-  assert.match(sentMessages[0], /Redis Pattern Profiler/);
-  assert.match(sentMessages[0], /quota session resume/);
+  assert.equal(sentMessages.length, 2);
+  const resumeBrief = sentMessages[sentMessages.length - 1];
+  assert.match(resumeBrief, /Redis Pattern Profiler/);
+  assert.match(resumeBrief, /quota session resume/);
+});
+
+test("hitting 100% on the seven_day window also interrupts and resumes the session (not just five_hour)", async () => {
+  const db = openDb(":memory:");
+  const clock = fakeClock(1_000_000);
+  const notifier = new Notifier(db, { macNotifications: false });
+
+  startSession(db, "Redis Pattern Profiler", "Implementing pattern detection");
+
+  const callbacks = buildSchedulerCallbacks(db, notifier);
+  const resets: string[] = [];
+  const scheduler = new Scheduler({
+    db,
+    poll: async () => undefined,
+    now: clock.now,
+    setTimeoutFn: clock.setTimeoutFn,
+    clearTimeoutFn: clock.clearTimeoutFn,
+    pollIntervalMs: 999_999_999,
+    onReset: (kind) => {
+      resets.push(kind);
+      callbacks.onReset(kind);
+    },
+    onSnapshot: callbacks.onSnapshot,
+  });
+  scheduler.start();
+
+  scheduler.ingest({
+    capturedAt: clock.now(),
+    source: "statusline",
+    raw: {},
+    windows: [{ kind: "seven_day", utilization: 100, resetsAt: clock.now() + 10_000 }],
+  });
+
+  const interrupted = getCurrentSession(db)!;
+  assert.equal(interrupted.lifecycle, "interrupted");
+  assert.equal(interrupted.interruption_kind, "seven_day");
+
+  clock.advanceTo(clock.now() + 10_000);
+  assert.deepEqual(resets, ["seven_day"]);
+
+  const readyToResume = getCurrentSession(db)!;
+  assert.equal(readyToResume.lifecycle, "ready_to_resume");
 });
 
 test("session lifecycle survives an agent restart (reopen the same db file)", async () => {

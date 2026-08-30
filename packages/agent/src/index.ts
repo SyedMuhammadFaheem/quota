@@ -1,7 +1,8 @@
+import type Database from "better-sqlite3";
 import { openDb } from "./storage/db.ts";
 import { createApp } from "./api/server.ts";
 import { Notifier, type NotifierConfig } from "./notifications/notifier.ts";
-import { Scheduler } from "./scheduler/scheduler.ts";
+import { Scheduler, type SchedulerDeps } from "./scheduler/scheduler.ts";
 import { fetchUsageSnapshot } from "./provider/oauth-fallback.ts";
 import { loadConfig, AGENT_PORT } from "./config.ts";
 import { getCurrentSession, markInterrupted, markReadyToResume } from "./storage/sessions.ts";
@@ -18,6 +19,29 @@ export function buildNotifierConfig(config: ReturnType<typeof loadConfig>): Noti
   };
 }
 
+/** Wires session interruption/resume into the scheduler's reset/snapshot events, for any usage kind. */
+export function buildSchedulerCallbacks(
+  db: Database.Database,
+  notifier: Notifier,
+): Pick<SchedulerDeps, "onReset" | "onSnapshot"> {
+  return {
+    onReset: (kind) => {
+      const session = getCurrentSession(db);
+      const updated = session ? markReadyToResume(db, session.id, kind) : undefined;
+      notifier.notifyReset(kind, Date.now(), updated).catch((err) => console.error("quota: notifyReset failed", err));
+    },
+    onSnapshot: (snapshot) => {
+      notifier.notifyThresholds(snapshot).catch((err) => console.error("quota: notifyThresholds failed", err));
+      for (const w of snapshot.windows) {
+        if (w.utilization >= 100) {
+          const session = getCurrentSession(db);
+          if (session) markInterrupted(db, session.id, w.kind, `Claude ${w.kind.replace("_", "-")} limit reached`);
+        }
+      }
+    },
+  };
+}
+
 export function startAgent() {
   const config = loadConfig();
   const db = openDb();
@@ -27,20 +51,7 @@ export function startAgent() {
     db,
     poll: fetchUsageSnapshot,
     pollIntervalMs: config.pollIntervalMs,
-    onReset: (kind) => {
-      const session = getCurrentSession(db);
-      const updated =
-        session && kind === "five_hour" ? markReadyToResume(db, session.id, kind) : undefined;
-      void notifier.notifyReset(kind, Date.now(), updated);
-    },
-    onSnapshot: (snapshot) => {
-      void notifier.notifyThresholds(snapshot);
-      const fiveHour = snapshot.windows.find((w) => w.kind === "five_hour");
-      if (fiveHour && fiveHour.utilization >= 100) {
-        const session = getCurrentSession(db);
-        if (session) markInterrupted(db, session.id, "five_hour", "Claude 5-hour limit reached");
-      }
-    },
+    ...buildSchedulerCallbacks(db, notifier),
   });
   scheduler.start();
 

@@ -214,3 +214,31 @@ test("POST /api/work-sessions does NOT require force when superseding a plain ac
     assert.equal(second.status, 201, "no warning/force needed when the prior session was just active");
   });
 });
+
+test("POST /api/work-sessions/:id/complete is blocked (409) when it would discard a ready_to_resume session, unless forced", async () => {
+  await withServer(async (base, db) => {
+    const create = await fetch(`${base}/api/work-sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project: "Redis Pattern Profiler" }),
+    });
+    const session = await create.json();
+    markInterrupted(db, session.id, "five_hour", "Claude 5-hour limit reached");
+    markReadyToResume(db, session.id, "five_hour");
+
+    const blocked = await fetch(`${base}/api/work-sessions/${session.id}/complete`, { method: "POST" });
+    assert.equal(blocked.status, 409);
+    const body = await blocked.json();
+    assert.equal(body.error, "unresumed_session");
+
+    const stillCurrent = await (await fetch(`${base}/api/work-sessions/current`)).json();
+    assert.equal(stillCurrent.session.lifecycle, "ready_to_resume", "blocked complete must not have touched it");
+
+    const forced = await fetch(`${base}/api/work-sessions/${session.id}/complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ force: true }),
+    });
+    assert.equal((await forced.json()).lifecycle, "completed");
+  });
+});

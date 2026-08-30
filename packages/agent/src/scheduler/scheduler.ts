@@ -86,6 +86,8 @@ export class Scheduler {
       try {
         const snapshot = await this.poll();
         if (snapshot) this.ingest(snapshot);
+      } catch (err) {
+        console.error("quota: poll failed", err);
       } finally {
         this.schedulePoll(this.pollIntervalMs);
       }

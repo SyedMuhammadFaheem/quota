@@ -432,7 +432,18 @@ function buildSessionCommand(): Command {
           console.log("No active session.");
           return;
         }
-        await apiCall("POST", `/api/work-sessions/${current.id}/complete`);
+        let res = await apiCall("POST", `/api/work-sessions/${current.id}/complete`);
+        if (res.status === 409) {
+          const conflict = await res.json();
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await rl.question(`${conflict.message} Continue? [y/N]: `);
+          rl.close();
+          if (!/^y/i.test(answer)) {
+            console.log("Cancelled.");
+            return;
+          }
+          res = await apiCall("POST", `/api/work-sessions/${current.id}/complete`, { force: true });
+        }
         console.log(`Completed: ${current.project}`);
       } catch {
         console.error(AGENT_UNREACHABLE);

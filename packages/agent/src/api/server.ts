@@ -10,6 +10,7 @@ import { getSettingJson, setSettingJson } from "../storage/settings.ts";
 import type { UsageKind } from "../provider/types.ts";
 import {
   getCurrentSession,
+  getSession,
   listSessions,
   startSession,
   updateSession,
@@ -141,12 +142,26 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
   });
 
   app.post("/api/work-sessions/:id/complete", (req, res) => {
-    const session = completeSession(db, Number(req.params.id));
-    if (!session) {
+    const { force } = req.body ?? {};
+    const id = Number(req.params.id);
+    const current = getSession(db, id);
+    if (!current) {
       res.status(404).json({ error: "not found" });
       return;
     }
-    res.json(session);
+    // Same discard risk as starting a new session: completing an interrupted/ready_to_resume
+    // session throws away its Resume Brief. Require an explicit `force` to proceed past that.
+    if ((current.lifecycle === "interrupted" || current.lifecycle === "ready_to_resume") && !force) {
+      res.status(409).json({
+        error: "unresumed_session",
+        message: `"${current.project}" is still ${
+          current.lifecycle === "ready_to_resume" ? "ready to resume" : "interrupted"
+        } -- completing it will discard the Resume Brief.`,
+        session: current,
+      });
+      return;
+    }
+    res.json(completeSession(db, id));
   });
 
   app.get("/api/sessions", (req, res) => {

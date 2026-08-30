@@ -1,3 +1,5 @@
+import { fetchJson } from "@quota/shared";
+
 const AGENT_URL = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://127.0.0.1:4317";
 
 export interface UsageWindowDto {
@@ -40,10 +42,8 @@ export interface StatusResponse {
   session: WorkSession | null;
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${AGENT_URL}${path}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`agent request failed: ${res.status}`);
-  return res.json();
+function get<T>(path: string): Promise<T> {
+  return fetchJson<T>(`${AGENT_URL}${path}`, { cache: "no-store" });
 }
 
 export function getStatus() {
@@ -70,8 +70,6 @@ export function getSessionHistory(limit = 10) {
   return get<{ sessions: WorkSession[] }>(`/api/work-sessions?limit=${limit}`);
 }
 
-export async function resumeSession(id: number) {
-  const res = await fetch(`${AGENT_URL}/api/work-sessions/${id}/resume`, { method: "POST" });
-  if (!res.ok) throw new Error(`resume failed: ${res.status}`);
-  return res.json() as Promise<WorkSession>;
+export function resumeSession(id: number) {
+  return fetchJson<WorkSession>(`${AGENT_URL}/api/work-sessions/${id}/resume`, { method: "POST" });
 }

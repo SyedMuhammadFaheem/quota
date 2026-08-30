@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import path from "node:path";
 import type { UsageKind } from "../provider/types.ts";
 
 export type SessionLifecycle = "active" | "interrupted" | "ready_to_resume" | "completed";
@@ -35,6 +36,12 @@ function toWorkSession(row: WorkSessionRow): WorkSession {
   return { ...rest, nextTasks };
 }
 
+/** Runs an INSERT/UPDATE with a `RETURNING *` clause and maps the row back in one round trip. */
+function mutateReturning(db: Database.Database, sql: string, params: unknown[]): WorkSession | undefined {
+  const row = db.prepare(sql).get(...params) as WorkSessionRow | undefined;
+  return row ? toWorkSession(row) : undefined;
+}
+
 /** Ends any non-completed session (superseded by a new one) without touching its history. */
 function completeOpenSessions(db: Database.Database): void {
   db.prepare(
@@ -45,12 +52,11 @@ function completeOpenSessions(db: Database.Database): void {
 export function startSession(db: Database.Database, project: string, statusText?: string): WorkSession {
   completeOpenSessions(db);
   const now = Date.now();
-  const info = db
-    .prepare(
-      "INSERT INTO work_sessions (project, status_text, started_at, last_activity_at) VALUES (?, ?, ?, ?)",
-    )
-    .run(project, statusText ?? null, now, now);
-  return getSession(db, Number(info.lastInsertRowid))!;
+  return mutateReturning(
+    db,
+    "INSERT INTO work_sessions (project, status_text, started_at, last_activity_at) VALUES (?, ?, ?, ?) RETURNING *",
+    [project, statusText ?? null, now, now],
+  )!;
 }
 
 export function getSession(db: Database.Database, id: number): WorkSession | undefined {
@@ -82,37 +88,33 @@ export function updateSession(
 ): WorkSession | undefined {
   const current = getSession(db, id);
   if (!current) return undefined;
-  db.prepare("UPDATE work_sessions SET project = ?, status_text = ?, last_activity_at = ? WHERE id = ?").run(
-    fields.project ?? current.project,
-    fields.statusText ?? current.status_text,
-    Date.now(),
-    id,
+  return mutateReturning(
+    db,
+    "UPDATE work_sessions SET project = ?, status_text = ?, last_activity_at = ? WHERE id = ? RETURNING *",
+    [fields.project ?? current.project, fields.statusText ?? current.status_text, Date.now(), id],
   );
-  return getSession(db, id);
 }
 
 export function appendNote(db: Database.Database, id: number, text: string): WorkSession | undefined {
   const current = getSession(db, id);
   if (!current) return undefined;
   const notes = current.notes ? `${current.notes}\n${text}` : text;
-  db.prepare("UPDATE work_sessions SET notes = ?, last_activity_at = ? WHERE id = ?").run(
-    notes,
-    Date.now(),
-    id,
+  return mutateReturning(
+    db,
+    "UPDATE work_sessions SET notes = ?, last_activity_at = ? WHERE id = ? RETURNING *",
+    [notes, Date.now(), id],
   );
-  return getSession(db, id);
 }
 
 export function appendNextTask(db: Database.Database, id: number, text: string): WorkSession | undefined {
   const current = getSession(db, id);
   if (!current) return undefined;
   const nextTasks = [...current.nextTasks, text];
-  db.prepare("UPDATE work_sessions SET next_tasks = ?, last_activity_at = ? WHERE id = ?").run(
-    JSON.stringify(nextTasks),
-    Date.now(),
-    id,
+  return mutateReturning(
+    db,
+    "UPDATE work_sessions SET next_tasks = ?, last_activity_at = ? WHERE id = ? RETURNING *",
+    [JSON.stringify(nextTasks), Date.now(), id],
   );
-  return getSession(db, id);
 }
 
 /** Claude usage for `kind` hit its limit -- checkpoint the active session as interrupted. */
@@ -124,11 +126,11 @@ export function markInterrupted(
 ): WorkSession | undefined {
   const current = getSession(db, id);
   if (!current || current.lifecycle !== "active") return current;
-  const now = Date.now();
-  db.prepare(
-    "UPDATE work_sessions SET lifecycle = 'interrupted', interrupted_at = ?, interruption_kind = ?, interruption_reason = ? WHERE id = ?",
-  ).run(now, kind, reason, id);
-  return getSession(db, id);
+  return mutateReturning(
+    db,
+    "UPDATE work_sessions SET lifecycle = 'interrupted', interrupted_at = ?, interruption_kind = ?, interruption_reason = ? WHERE id = ? RETURNING *",
+    [Date.now(), kind, reason, id],
+  );
 }
 
 /** Claude reset for `kind` -- the interrupted session (if it matches) is ready to resume. */
@@ -141,27 +143,57 @@ export function markReadyToResume(
   if (!current || current.lifecycle !== "interrupted" || current.interruption_kind !== kind) {
     return current;
   }
-  db.prepare("UPDATE work_sessions SET lifecycle = 'ready_to_resume', reset_at = ? WHERE id = ?").run(
-    Date.now(),
-    id,
+  return mutateReturning(
+    db,
+    "UPDATE work_sessions SET lifecycle = 'ready_to_resume', reset_at = ? WHERE id = ? RETURNING *",
+    [Date.now(), id],
   );
-  return getSession(db, id);
 }
 
 export function resumeSession(db: Database.Database, id: number): WorkSession | undefined {
   const current = getSession(db, id);
   if (!current || current.lifecycle !== "ready_to_resume") return current;
   const now = Date.now();
-  db.prepare(
-    "UPDATE work_sessions SET lifecycle = 'active', resumed_at = ?, last_activity_at = ? WHERE id = ?",
-  ).run(now, now, id);
-  return getSession(db, id);
+  return mutateReturning(
+    db,
+    "UPDATE work_sessions SET lifecycle = 'active', resumed_at = ?, last_activity_at = ? WHERE id = ? RETURNING *",
+    [now, now, id],
+  );
+}
+
+export interface SessionActivityUpdate {
+  statusText?: string;
+  note?: string;
+  nextTasks?: string[];
+}
+
+/**
+ * Finds (or creates, named from `cwd`) the current session and applies a status/note/next-task
+ * update to it. Shared by the live `/api/internal/session-activity` route and the SessionEnd
+ * hook's direct-DB fallback (bin/quota-session-hook.ts) so the two paths can't drift apart.
+ */
+export function applySessionActivity(
+  db: Database.Database,
+  update: SessionActivityUpdate,
+  cwd?: string,
+): WorkSession {
+  let session = getCurrentSession(db);
+  if (!session) {
+    const project = cwd ? path.basename(cwd) : "Untitled session";
+    session = startSession(db, project);
+  }
+  if (update.statusText) session = updateSession(db, session.id, { statusText: update.statusText }) ?? session;
+  if (update.note) session = appendNote(db, session.id, update.note) ?? session;
+  for (const t of update.nextTasks ?? []) {
+    if (!session.nextTasks.includes(t)) session = appendNextTask(db, session.id, t) ?? session;
+  }
+  return session;
 }
 
 export function completeSession(db: Database.Database, id: number): WorkSession | undefined {
-  db.prepare("UPDATE work_sessions SET lifecycle = 'completed', completed_at = ? WHERE id = ?").run(
-    Date.now(),
-    id,
+  return mutateReturning(
+    db,
+    "UPDATE work_sessions SET lifecycle = 'completed', completed_at = ? WHERE id = ? RETURNING *",
+    [Date.now(), id],
   );
-  return getSession(db, id);
 }

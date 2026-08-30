@@ -1,5 +1,7 @@
 export type UsageKind = "five_hour" | "seven_day";
 
+export const USAGE_KINDS: UsageKind[] = ["five_hour", "seven_day"];
+
 export type UsageSource = "statusline" | "oauth_api";
 
 export interface UsageWindow {

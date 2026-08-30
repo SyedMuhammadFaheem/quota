@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { UsageKind, UsageSnapshot } from "../provider/types.ts";
 import type { WorkSession } from "../storage/sessions.ts";
-import { logNotification, wasTriggerSent } from "../storage/notifications-log.ts";
+import { logNotification, claimTrigger } from "../storage/notifications-log.ts";
 import { sendTelegram, type TelegramConfig } from "./telegram.ts";
 import { sendNtfy, type NtfyConfig } from "./ntfy.ts";
 import { sendMacNotification } from "./macos.ts";
@@ -33,36 +33,38 @@ export class Notifier {
     return this.config.thresholds ?? DEFAULT_THRESHOLDS;
   }
 
+  /** The configured channels, each already bound to its own send credentials. */
+  private get channels(): { name: string; send: (message: string) => Promise<boolean> }[] {
+    const channels: { name: string; send: (message: string) => Promise<boolean> }[] = [];
+    if (this.config.telegram) {
+      const telegram = this.config.telegram;
+      channels.push({ name: "telegram", send: (message) => sendTelegram(telegram, message) });
+    }
+    if (this.config.ntfy) {
+      const ntfy = this.config.ntfy;
+      channels.push({ name: "ntfy", send: (message) => sendNtfy(ntfy, message) });
+    }
+    if (this.config.macNotifications !== false) {
+      channels.push({ name: "macos", send: sendMacNotification });
+    }
+    return channels;
+  }
+
   async send(message: string, triggerKey: string): Promise<void> {
-    if (wasTriggerSent(this.db, triggerKey)) return;
-    const results = await Promise.all([
-      this.config.telegram
-        ? sendTelegram(this.config.telegram, message).then((ok) => ok && this.log("telegram", message, triggerKey))
-        : Promise.resolve(),
-      this.config.ntfy
-        ? sendNtfy(this.config.ntfy, message).then((ok) => ok && this.log("ntfy", message, triggerKey))
-        : Promise.resolve(),
-      this.config.macNotifications !== false
-        ? sendMacNotification(message).then((ok) => ok && this.log("macos", message, triggerKey))
-        : Promise.resolve(),
-    ]);
-    void results;
+    if (!claimTrigger(this.db, triggerKey)) return;
+    await Promise.all(
+      this.channels.map((channel) =>
+        channel.send(message).then((ok) => ok && this.log(channel.name, message, triggerKey)),
+      ),
+    );
   }
 
   /** Always sends on every configured channel, ignoring dedup -- used by `quota notify test`. */
   async sendTest(): Promise<{ channel: string; ok: boolean }[]> {
     const message = "🔥 Claude Quota test notification. If you can read this, it works.";
-    const attempts: { channel: string; ok: boolean }[] = [];
-    if (this.config.telegram) {
-      attempts.push({ channel: "telegram", ok: await sendTelegram(this.config.telegram, message) });
-    }
-    if (this.config.ntfy) {
-      attempts.push({ channel: "ntfy", ok: await sendNtfy(this.config.ntfy, message) });
-    }
-    if (this.config.macNotifications !== false) {
-      attempts.push({ channel: "macos", ok: await sendMacNotification(message) });
-    }
-    return attempts;
+    return Promise.all(
+      this.channels.map(async (channel) => ({ channel: channel.name, ok: await channel.send(message) })),
+    );
   }
 
   /** `session` is the resumable work session this reset unblocked, if any -- turns the
@@ -83,7 +85,10 @@ export class Notifier {
       const crossed = this.thresholds.filter((t) => w.utilization >= t).sort((a, b) => b - a);
       const highest = crossed[0];
       if (highest === undefined) continue;
-      const cycleKey = w.resetsAt ?? "unknown";
+      // Falls back to a UTC-day bucket, not a fixed "unknown" sentinel: a resets_at
+      // that's never known (some sources omit it) would otherwise dedup this
+      // threshold forever instead of just for the rest of the day.
+      const cycleKey = w.resetsAt ?? new Date(snapshot.capturedAt).toISOString().slice(0, 10);
       const message = `⚠️ Claude ${KIND_LABEL[w.kind]} usage at ${Math.round(w.utilization)}% (≥${highest}% threshold).`;
       await this.send(message, `${w.kind}:${highest}:${cycleKey}`);
     }

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { formatCountdown } from "@quota/shared";
 import {
   getStatus,
   getSessions,
@@ -16,15 +17,6 @@ import {
 } from "@/lib/api";
 
 const REFRESH_MS = 15_000;
-
-function formatCountdown(resetsAt: number | null): string {
-  if (!resetsAt) return "unknown";
-  const ms = resetsAt - Date.now();
-  if (ms <= 0) return "resetting now";
-  const mins = Math.round(ms / 60000);
-  if (mins < 60) return `${mins}m`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-}
 
 const LIFECYCLE_LABEL: Record<WorkSession["lifecycle"], string> = {
   active: "Active",
@@ -135,7 +127,7 @@ function UsageCard({ label, usage }: { label: string; usage: StatusResponse["usa
       <CardContent className="flex flex-col gap-2">
         <Progress value={pct} />
         <p className="text-sm text-neutral-500">
-          Resets in {formatCountdown(usage.resetsAt)} · source: {usage.source}
+          Resets in {formatCountdown(usage.resetsAt, "resetting now")} · source: {usage.source}
         </p>
       </CardContent>
     </Card>

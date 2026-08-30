@@ -28,6 +28,13 @@ const MIGRATIONS = [
     message TEXT NOT NULL,
     trigger_key TEXT NOT NULL
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_log_trigger_key ON notifications_log(trigger_key)`,
+  // Claimed synchronously (before any await) so two concurrent sends for the same
+  // trigger can't both pass the check -- see notifications-log.ts's claimTrigger().
+  `CREATE TABLE IF NOT EXISTS sent_triggers (
+    trigger_key TEXT PRIMARY KEY,
+    claimed_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -57,7 +64,23 @@ const MIGRATIONS = [
     resumed_at INTEGER,
     completed_at INTEGER
   )`,
+  // Partial: only the (small, hot) set of non-completed sessions needs indexing --
+  // getCurrentSession()'s `WHERE lifecycle != 'completed'` is the hottest read path.
+  `CREATE INDEX IF NOT EXISTS idx_work_sessions_lifecycle ON work_sessions(lifecycle) WHERE lifecycle != 'completed'`,
+  `CREATE INDEX IF NOT EXISTS idx_usage_snapshots_kind_captured ON usage_snapshots(kind, captured_at DESC)`,
 ];
+
+const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+// ponytail: prunes on every open rather than on its own scheduled interval -- cheap
+// at the daemon's poll cadence and CLI's open-per-command pattern; move to an
+// interval job if the db is ever left open for long unbroken stretches.
+function pruneOldData(db: Database.Database, now = Date.now()): void {
+  const cutoff = now - RETENTION_MS;
+  db.prepare("DELETE FROM usage_snapshots WHERE captured_at < ?").run(cutoff);
+  db.prepare("DELETE FROM notifications_log WHERE sent_at < ?").run(cutoff);
+  db.prepare("DELETE FROM sent_triggers WHERE claimed_at < ?").run(cutoff);
+}
 
 export function openDb(dbPath?: string): Database.Database {
   const file = dbPath ?? path.join(QUOTA_DIR, "quota.db");
@@ -65,5 +88,6 @@ export function openDb(dbPath?: string): Database.Database {
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
   for (const stmt of MIGRATIONS) db.exec(stmt);
+  pruneOldData(db);
   return db;
 }

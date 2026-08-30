@@ -16,7 +16,8 @@ before assuming any of it is a documented Anthropic API).
 
 ## Requirements
 
-- macOS (launchd auto-start, `osascript` notifications)
+- macOS, Linux, or Windows — see [Platform notes](#platform-notes) below for
+  what autostart and desktop notifications look like on each
 - Node.js >= 22.18 (runs TypeScript directly via Node's native type stripping
   — no build step)
 - Claude Code installed and used at least once, for the statusLine hook to
@@ -52,7 +53,9 @@ The wizard will:
   alongside any hooks you already have registered for those events — this is
   what keeps your session's status and next-tasks fresh automatically as you
   work, on top of the manual `quota session note/next`
-- offer to install a launchd agent so `quota` starts automatically at login
+- offer to install a native autostart entry (launchd on macOS, a systemd
+  `--user` unit on Linux, a Startup-folder script on Windows) so `quota`
+  starts automatically at login
 
 ## Usage
 
@@ -113,11 +116,51 @@ minutes by default, `POLL_INTERVAL_MS` in `.env`) fills the gap using the same
 undocumented usage endpoint Claude Code's own OAuth session already has
 access to. Full reasoning in [DESIGN.md](./DESIGN.md).
 
+## Platform notes
+
+Quota's storage, HTTP API, CLI, and web dashboard are pure Node and behave
+identically everywhere. Two things are OS-specific: autostart and desktop
+notifications. Telegram and ntfy are fully cross-platform and work the same
+on every OS — if you want reliable notifications when you're away from your
+desktop, prefer those over the native desktop ping.
+
+**macOS**
+- Autostart: a launchd agent (`~/Library/LaunchAgents/com.quota.agent.plist`),
+  loaded/unloaded via `launchctl`.
+- Notifications: native Notification Center, via `osascript`.
+
+**Linux**
+- Autostart: a systemd `--user` unit
+  (`~/.config/systemd/user/quota-agent.service`). `quota setup` runs
+  `systemctl --user enable --now` for you. By default a user unit only runs
+  while you're logged in; run `loginctl enable-linger $USER` once if you want
+  it running before login too.
+- Notifications: `notify-send`, provided by most desktop environments
+  (part of `libnotify`). Headless/no notification daemon → the desktop ping
+  silently no-ops; Telegram/ntfy still work.
+
+**Windows**
+- Autostart: `quota setup` drops a `.cmd` script into your per-user Startup
+  folder (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`), which
+  Windows runs at your next login — no admin rights needed. `quota start`
+  launches the agent immediately in the background and tracks its PID for
+  `quota stop`.
+- Notifications: a best-effort balloon tip via a built-in PowerShell/.NET
+  call — no extra dependency. If PowerShell notifications aren't available
+  in your environment, the desktop ping just no-ops; Telegram/ntfy still
+  work.
+
+**Unsupported platforms** (anything other than the three above): the desktop
+notification and autostart calls no-op with a clear message instead of
+crashing — `quota start`/`quota stop` still work by running the agent in the
+foreground.
+
 ## Troubleshooting
 
 - **`quota status` says "Could not reach the quota agent"** — run `quota
-  start`. If you installed the launchd agent, check
-  `~/.quota/logs/agent.err.log`.
+  start`. If you installed the autostart agent, check
+  `~/.quota/logs/agent.err.log` (macOS/Linux) or run `quota start` again
+  (Windows tracks the process via `~/.quota/agent.pid`).
 - **Usage shows "no data yet"** — open Claude Code once so the statusLine hook
   fires, or wait up to `POLL_INTERVAL_MS` for the fallback poll.
 - **Statusline looks different / broken after setup** — `quota setup` chains

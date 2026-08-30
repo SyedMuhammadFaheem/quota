@@ -211,7 +211,7 @@ test("e2e: setup wizard completes and writes both files when driven by piped mul
     assert.match(envFile, /NTFY_TOPIC=mytopic/);
     assert.match(envFile, /TELEGRAM_BOT_TOKEN=mytoken/);
     assert.match(envFile, /TELEGRAM_CHAT_ID=mychat/);
-    assert.match(envFile, /MAC_NOTIFICATIONS=false/);
+    assert.match(envFile, /OS_NOTIFICATIONS=false/);
 
     const settings = JSON.parse(fs.readFileSync(path.join(fakeHome, ".claude", "settings.json"), "utf8"));
     assert.equal(settings.statusLine.command, "quota-statusline");

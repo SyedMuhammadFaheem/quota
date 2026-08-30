@@ -4,12 +4,12 @@ import type { WorkSession } from "../storage/sessions.ts";
 import { logNotification, claimTrigger } from "../storage/notifications-log.ts";
 import { sendTelegram, type TelegramConfig } from "./telegram.ts";
 import { sendNtfy, type NtfyConfig } from "./ntfy.ts";
-import { sendMacNotification } from "./macos.ts";
+import { sendNativeNotification } from "../platform/index.ts";
 
 export interface NotifierConfig {
   telegram?: TelegramConfig;
   ntfy?: NtfyConfig;
-  macNotifications?: boolean;
+  osNotifications?: boolean;
   thresholds?: number[];
 }
 
@@ -44,8 +44,8 @@ export class Notifier {
       const ntfy = this.config.ntfy;
       channels.push({ name: "ntfy", send: (message) => sendNtfy(ntfy, message) });
     }
-    if (this.config.macNotifications !== false) {
-      channels.push({ name: "macos", send: sendMacNotification });
+    if (this.config.osNotifications !== false) {
+      channels.push({ name: "native", send: (message) => sendNativeNotification("Claude Quota", message) });
     }
     return channels;
   }

@@ -14,7 +14,7 @@ export function buildNotifierConfig(config: ReturnType<typeof loadConfig>): Noti
         ? { botToken: config.telegramBotToken, chatId: config.telegramChatId }
         : undefined,
     ntfy: config.ntfyTopic ? { topic: config.ntfyTopic, server: config.ntfyServer } : undefined,
-    osNotifications: config.osNotifications,
+    macNotifications: config.macNotifications,
     thresholds: config.thresholds,
   };
 }

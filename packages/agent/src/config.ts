@@ -34,7 +34,7 @@ export interface AppConfig {
   telegramChatId?: string;
   ntfyTopic?: string;
   ntfyServer?: string;
-  osNotifications: boolean;
+  macNotifications: boolean;
   thresholds: number[];
   pollIntervalMs: number;
 }
@@ -46,9 +46,7 @@ export function loadConfig(): AppConfig {
     telegramChatId: env.TELEGRAM_CHAT_ID,
     ntfyTopic: env.NTFY_TOPIC,
     ntfyServer: env.NTFY_SERVER,
-    // OS_NOTIFICATIONS is the current key; MAC_NOTIFICATIONS is honored as a
-    // backwards-compatible alias for .env files written before the rename.
-    osNotifications: (env.OS_NOTIFICATIONS ?? env.MAC_NOTIFICATIONS) !== "false",
+    macNotifications: env.MAC_NOTIFICATIONS !== "false",
     thresholds: env.THRESHOLDS ? env.THRESHOLDS.split(",").map(Number) : [80, 90, 95, 100],
     pollIntervalMs: env.POLL_INTERVAL_MS ? Number(env.POLL_INTERVAL_MS) : 5 * 60 * 1000,
   };

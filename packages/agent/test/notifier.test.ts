@@ -6,7 +6,7 @@ import { recentNotifications } from "../src/storage/notifications-log.ts";
 
 test("threshold crossing sends once and dedups repeat crossings of the same window", async () => {
   const db = openDb(":memory:");
-  const notifier = new Notifier(db, { ntfy: { topic: "test" }, osNotifications: false });
+  const notifier = new Notifier(db, { ntfy: { topic: "test" }, macNotifications: false });
   let fetchCalls = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -48,7 +48,7 @@ test("threshold crossing sends once and dedups repeat crossings of the same wind
 
 test("concurrent notifyThresholds calls for the same crossing only send once (claim race)", async () => {
   const db = openDb(":memory:");
-  const notifier = new Notifier(db, { ntfy: { topic: "test" }, osNotifications: false });
+  const notifier = new Notifier(db, { ntfy: { topic: "test" }, macNotifications: false });
   let fetchCalls = 0;
   const originalFetch = globalThis.fetch;
   // Simulate a slow network call: both concurrent notifyThresholds() calls reach their
@@ -75,7 +75,7 @@ test("concurrent notifyThresholds calls for the same crossing only send once (cl
 
 test("a threshold under an unknown resets_at renotifies on a new day instead of being suppressed forever", async () => {
   const db = openDb(":memory:");
-  const notifier = new Notifier(db, { ntfy: { topic: "test" }, osNotifications: false });
+  const notifier = new Notifier(db, { ntfy: { topic: "test" }, macNotifications: false });
   let fetchCalls = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -116,7 +116,7 @@ test("a threshold under an unknown resets_at renotifies on a new day instead of 
 
 test("reset notification fires once per reset event", async () => {
   const db = openDb(":memory:");
-  const notifier = new Notifier(db, { ntfy: { topic: "test" }, osNotifications: false });
+  const notifier = new Notifier(db, { ntfy: { topic: "test" }, macNotifications: false });
   let fetchCalls = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {

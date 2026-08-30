@@ -81,11 +81,12 @@ due fires immediately on wake, which is the correct behavior here).
 agent (Node/TS daemon, binds 127.0.0.1 only)
 ├── provider/        Claude-specific usage sources (isolated, swappable)
 ├── scheduler/        reset alarms + throttled fallback polling
-├── notifications/    telegram / ntfy / macOS (osascript), threshold+reset dispatch with dedup
+├── notifications/    telegram / ntfy / native desktop, threshold+reset dispatch with dedup
 ├── storage/           SQLite (better-sqlite3, WAL), no ORM
 ├── api/               local Express API consumed by the CLI and the dashboard
 ├── cli/               commander: status/setup/start/stop/tasks/notify test
-└── launchd/           generates the login-item plist
+├── launchd/           generates the macOS login-item plist
+└── platform/           OS dispatch: native notifications + autostart (macos/linux/windows)
 
 web (Next.js + Tailwind, hand-rolled shadcn-style components)
 └── app/page.tsx       reads-only client of the local agent API, polls every 15s

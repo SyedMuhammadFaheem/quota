@@ -48,10 +48,13 @@ async function waitForAgent(port: number, deadline = Date.now() + 5000): Promise
   throw new Error(`agent on port ${port} never became reachable`);
 }
 
-async function withRealAgent(fn: (env: NodeJS.ProcessEnv, port: number) => Promise<void>) {
+async function withRealAgent(
+  fn: (env: NodeJS.ProcessEnv, port: number) => Promise<void>,
+  extraEnv: NodeJS.ProcessEnv = {},
+) {
   const quotaHome = fs.mkdtempSync(path.join(os.tmpdir(), "quota-e2e-cli-"));
   const port = freePort();
-  const env = { ...process.env, QUOTA_HOME: quotaHome, QUOTA_PORT: String(port) };
+  const env = { ...process.env, QUOTA_HOME: quotaHome, QUOTA_PORT: String(port), ...extraEnv };
   const child = spawn(process.execPath, [BIN], { env, cwd: AGENT_DIR, stdio: "pipe" });
   // Subscribe at spawn: if the agent crashes on startup, a listener attached later never fires and the test hangs.
   const exited = new Promise((r) => child.once("exit", r));
@@ -84,6 +87,12 @@ test("e2e: CLI reports a clear error when the agent isn't running", () => {
   } finally {
     fs.rmSync(quotaHome, { recursive: true, force: true });
   }
+});
+
+test("e2e: withRealAgent fails (instead of hanging) when the agent crashes on startup", { timeout: 15_000 }, async () => {
+  // A preload that doesn't exist makes the agent process exit immediately, before it ever listens.
+  const crash = { NODE_OPTIONS: "--import=./quota-e2e-does-not-exist.mjs" };
+  await assert.rejects(withRealAgent(async () => {}, crash), /never became reachable/);
 });
 
 test("e2e: full work-session flow through the real CLI against a real agent process", async () => {
@@ -181,6 +190,11 @@ test("e2e: task queue flow through the real CLI against a real agent process", a
 
     const del = runCli(["tasks", "delete", id], env);
     assert.match(del.stdout, new RegExp(`Deleted #${id}`));
+
+    const badPriority = runCli(["tasks", "add", "Bad", "-p", "abc"], env);
+    assert.equal(badPriority.status, 1);
+    assert.match(badPriority.stderr, /Priority must be a number, got "abc"/);
+    assert.doesNotMatch(badPriority.stderr, /SqliteError/);
   });
 });
 

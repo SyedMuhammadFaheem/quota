@@ -151,6 +151,20 @@ test("bad input gets a JSON 4xx, never a 500 or an HTML stack trace", async () =
     assert.equal(badPriority.status, 400);
     assert.match((await badPriority.json()).error, /priority/);
 
+    const task = await (
+      await fetch(`${base}/api/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "t", priority: 2 }),
+      })
+    ).json();
+    const badPatch = await fetch(`${base}/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ priority: "high" }),
+    });
+    assert.equal(badPatch.status, 400);
+
     const badJson = await fetch(`${base}/api/tasks`, {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -16,7 +16,15 @@ test("Stop: strips markdown formatting from the status line", () => {
     hook_event_name: "Stop",
     last_assistant_message: "Implemented `parseUsage()` and **fixed** the [bug](https://example.com).",
   });
-  assert.equal(update.statusText, "Implemented and fixed the bug.");
+  assert.equal(update.statusText, "Implemented parseUsage() and fixed the bug.");
+});
+
+test("Stop: drops fenced code blocks from the status line", () => {
+  const update = extractSessionContext({
+    hook_event_name: "Stop",
+    last_assistant_message: "Patched the retry loop: ```ts\nretry(3)\n``` in webhooks.ts.",
+  });
+  assert.equal(update.statusText, "Patched the retry loop: in webhooks.ts.");
 });
 
 test("Stop: extracts a Next steps list", () => {

@@ -65,6 +65,11 @@ export function recordResetEvent(db: Database.Database, kind: UsageKind, occurre
   );
 }
 
+/** True if a reset for `kind` was already recorded at or after `resetsAt` -- i.e. this window's reset already fired. */
+export function resetRecordedSince(db: Database.Database, kind: UsageKind, resetsAt: number): boolean {
+  return !!db.prepare("SELECT 1 FROM reset_events WHERE kind = ? AND occurred_at >= ? LIMIT 1").get(kind, resetsAt);
+}
+
 export function markResetEventsNotified(db: Database.Database, kind: UsageKind): void {
   db.prepare("UPDATE reset_events SET notified = 1 WHERE kind = ? AND notified = 0").run(kind);
 }

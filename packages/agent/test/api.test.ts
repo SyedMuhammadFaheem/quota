@@ -109,3 +109,55 @@ test("state persists across a simulated agent restart (reopen the same db file)"
     server.close();
   }
 });
+
+test("only localhost callers are allowed: foreign Origin and foreign Host are rejected", async () => {
+  const http = await import("node:http");
+  await withServer(async (base) => {
+    const noOrigin = await fetch(`${base}/api/status`);
+    assert.equal(noOrigin.status, 200, "CLI/hook callers send no Origin");
+    assert.equal(noOrigin.headers.get("access-control-allow-origin"), null);
+
+    const dashboard = await fetch(`${base}/api/status`, { headers: { origin: "http://localhost:3000" } });
+    assert.equal(dashboard.status, 200);
+    assert.equal(dashboard.headers.get("access-control-allow-origin"), "http://localhost:3000");
+
+    const evil = await fetch(`${base}/api/notify/test`, { method: "POST", headers: { origin: "https://evil.example" } });
+    assert.equal(evil.status, 403);
+
+    // DNS rebinding: a foreign hostname resolving to 127.0.0.1 arrives with its own Host header.
+    const rebound = await new Promise<number>((resolve, reject) => {
+      http
+        .get(`${base}/api/status`, { headers: { host: "evil.example:4317" } }, (res) => {
+          res.resume();
+          resolve(res.statusCode!);
+        })
+        .on("error", reject);
+    });
+    assert.equal(rebound, 403);
+  });
+});
+
+test("bad input gets a JSON 4xx, never a 500 or an HTML stack trace", async () => {
+  await withServer(async (base) => {
+    const badLimit = await fetch(`${base}/api/work-sessions?limit=abc`);
+    assert.equal(badLimit.status, 200);
+    assert.equal((await fetch(`${base}/api/notifications?limit=-1`)).status, 200);
+
+    const badPriority = await fetch(`${base}/api/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "t", priority: "high" }),
+    });
+    assert.equal(badPriority.status, 400);
+    assert.match((await badPriority.json()).error, /priority/);
+
+    const badJson = await fetch(`${base}/api/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{bad json",
+    });
+    assert.equal(badJson.status, 400);
+    assert.match(badJson.headers.get("content-type") ?? "", /application\/json/);
+    assert.doesNotMatch(await badJson.text(), /<html|at .*\.js/i);
+  });
+});

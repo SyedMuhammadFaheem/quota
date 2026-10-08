@@ -17,9 +17,13 @@ before assuming any of it is a documented Anthropic API).
 ## Requirements
 
 - macOS, Linux, or Windows — see [Platform notes](#platform-notes) below for
-  what autostart and desktop notifications look like on each
+  what autostart and desktop notifications look like on each. **Only macOS
+  has been fully tested end to end so far**; Linux and Windows are
+  implemented and unit-tested but haven't been run on a real machine yet
+  ([help wanted](#help-wanted-testing-on-linux-and-windows)).
 - Node.js >= 22.18 (runs TypeScript directly via Node's native type stripping
-  — no build step)
+  — no build step). Tested on Node 22 LTS. Node 26 can't currently build the
+  `better-sqlite3` dependency, so `npm install` / the agent will fail there.
 - Claude Code installed and used at least once, for the statusLine hook to
   capture real usage data
 
@@ -102,9 +106,10 @@ npm run dev:web
 # open http://localhost:3000
 ```
 
-The dashboard is a read-only client of the agent's local API
+The dashboard is a client of the agent's local API
 (`http://127.0.0.1:4317` by default, override with `QUOTA_PORT` /
-`NEXT_PUBLIC_AGENT_URL`).
+`NEXT_PUBLIC_AGENT_URL`). Open it via `localhost` or `127.0.0.1` — the agent
+rejects requests from any other origin (see [Security notes](#security-notes)).
 
 ## How usage data is captured
 
@@ -123,6 +128,11 @@ identically everywhere. Two things are OS-specific: autostart and desktop
 notifications. Telegram and ntfy are fully cross-platform and work the same
 on every OS — if you want reliable notifications when you're away from your
 desktop, prefer those over the native desktop ping.
+
+> **Testing status:** macOS is fully tested end to end (setup wizard,
+> agent, CLI, Claude Code hooks, limit → reset → Resume Brief, ntfy and
+> native notifications, dashboard). Linux and Windows are covered by unit
+> tests only — see below.
 
 **macOS**
 - Autostart: a launchd agent (`~/Library/LaunchAgents/com.quota.agent.plist`),
@@ -155,6 +165,23 @@ notification and autostart calls no-op with a clear message instead of
 crashing — `quota start`/`quota stop` still work by running the agent in the
 foreground.
 
+### Help wanted: testing on Linux and Windows
+
+Quota has only been run end to end on macOS. If you're on Linux or Windows,
+please volunteer to try it out — it's the single most useful contribution
+right now. Run through:
+
+1. `npm install`, `npm test` (all tests should pass)
+2. `quota setup` — answer yes to autostart; log out and back in, and check
+   `quota status` reaches the agent
+3. `quota notify test` — did the desktop notification appear?
+4. `quota session start "Test"`, `quota session status`, `quota session done`
+5. `npm run dev:web` and open the dashboard
+6. `quota stop`
+
+Then [open an issue](https://github.com/SyedMuhammadFaheem/quota/issues/new) with your OS/distro and version,
+Node version, and what worked or didn't (error output is very welcome).
+
 ## Troubleshooting
 
 - **`quota status` says "Could not reach the quota agent"** — run `quota
@@ -179,7 +206,11 @@ foreground.
   `api.anthropic.com`.
 - Notification secrets (Telegram/ntfy) live in `~/.quota/.env` with `chmod
   600` — file-permission protection, not OS-keychain-grade encryption.
-- The local API binds `127.0.0.1` only.
+- The local API binds `127.0.0.1` only, and rejects any request whose
+  `Origin` or `Host` isn't localhost — so a website open in your browser
+  can't read or change your sessions (including via DNS rebinding). The API
+  has no authentication beyond that: other programs running as your user
+  can still call it.
 - No telemetry is collected, ever.
 
 ## License

@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { UsageKind, UsageSnapshot } from "../provider/types.ts";
 import { USAGE_KINDS } from "../provider/types.ts";
-import { insertSnapshot, latestSnapshot, recordResetEvent } from "../storage/snapshots.ts";
+import { insertSnapshot, latestSnapshot, recordResetEvent, resetRecordedSince } from "../storage/snapshots.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1; // setTimeout's max delay
@@ -75,6 +75,9 @@ export class Scheduler {
     if (existing) this.clearTimeoutFn(existing);
     const delay = Math.min(Math.max(resetsAt - this.now(), 0), MAX_TIMEOUT_MS);
     const timer = this.setTimeoutFn(() => {
+      // A resets_at already in the past (a re-sent statusline payload, or an agent restart
+      // after the reset) arms a 0ms alarm -- skip it if this window's reset already fired.
+      if (resetRecordedSince(this.db, kind, resetsAt)) return;
       recordResetEvent(this.db, kind, this.now());
       this.onReset(kind);
     }, delay);

@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 import type Database from "better-sqlite3";
 import type { Notifier } from "../notifications/notifier.ts";
 import type { Scheduler } from "../scheduler/scheduler.ts";
@@ -26,17 +26,36 @@ export interface ApiDeps {
   scheduler?: Scheduler;
 }
 
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+/** A positive integer `?limit=`, or `fallback` for anything else. */
+function limitParam(value: unknown, fallback = 20): number {
+  const n = Number(value ?? fallback);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
 export function createApp({ db, notifier, scheduler }: ApiDeps) {
   const app = express();
-  app.use(express.json());
-  // The dashboard (Next.js dev/prod server) runs on a different localhost port,
-  // so cross-origin requests need this even though everything stays on 127.0.0.1.
-  app.use((_req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,PUT,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "content-type");
+  // The API is unauthenticated, so only local callers may use it. Browsers always send
+  // Origin cross-site, so a non-local Origin is some website the user has open; a non-local
+  // Host is a DNS-rebinding attempt. The CLI and Claude Code hooks send no Origin at all.
+  // The dashboard runs on a different localhost port, so local origins get CORS headers.
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (!LOCAL_HOST.test(req.headers.host ?? "") || (origin !== undefined && !LOCAL_ORIGIN.test(origin))) {
+      res.status(403).json({ error: "forbidden: the quota agent only accepts requests from localhost" });
+      return;
+    }
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,PUT,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "content-type");
+    }
     next();
   });
+  app.use(express.json());
   app.options(/.*/, (_req, res) => res.sendStatus(204));
 
   app.get("/api/status", (_req, res) => {
@@ -64,7 +83,7 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
   });
 
   app.get("/api/work-sessions", (req, res) => {
-    res.json({ sessions: listSessions(db, Number(req.query.limit ?? 20)) });
+    res.json({ sessions: listSessions(db, limitParam(req.query.limit)) });
   });
 
   app.post("/api/work-sessions", (req, res) => {
@@ -163,7 +182,7 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
 
   app.get("/api/sessions", (req, res) => {
     const kind = (req.query.kind as UsageKind) ?? "five_hour";
-    const limit = Number(req.query.limit ?? 20);
+    const limit = limitParam(req.query.limit);
     res.json({
       snapshots: recentSnapshots(db, kind, limit),
       resetEvents: recentResetEvents(db, limit),
@@ -172,7 +191,7 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
   });
 
   app.get("/api/notifications", (req, res) => {
-    res.json({ notifications: recentNotifications(db, Number(req.query.limit ?? 20)) });
+    res.json({ notifications: recentNotifications(db, limitParam(req.query.limit)) });
   });
 
   app.get("/api/tasks", (req, res) => {
@@ -186,13 +205,21 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
       res.status(400).json({ error: "title is required" });
       return;
     }
+    if (!Number.isFinite(Number(priority ?? 0))) {
+      res.status(400).json({ error: "priority must be a number" });
+      return;
+    }
     res.status(201).json(createTask(db, title.trim(), Number(priority ?? 0)));
   });
 
   app.patch("/api/tasks/:id", (req, res) => {
     const id = Number(req.params.id);
     const { title, priority, status } = req.body ?? {};
-    let task = updateTask(db, id, { title, priority });
+    if (priority !== undefined && !Number.isFinite(Number(priority))) {
+      res.status(400).json({ error: "priority must be a number" });
+      return;
+    }
+    let task = updateTask(db, id, { title, priority: priority === undefined ? undefined : Number(priority) });
     if (status === "done") task = completeTask(db, id);
     if (!task) {
       res.status(404).json({ error: "not found" });
@@ -242,6 +269,15 @@ export function createApp({ db, notifier, scheduler }: ApiDeps) {
     scheduler.ingest(snapshot);
     res.status(204).end();
   });
+
+  // JSON errors only, never Express's default HTML page with a stack trace. Client errors
+  // (e.g. a malformed JSON body) keep their own status and message; anything else is a bug.
+  const onError: ErrorRequestHandler = (err, _req, res, _next) => {
+    const status = Number(err?.status ?? err?.statusCode ?? 500);
+    if (status >= 500) console.error("quota: request failed", err);
+    res.status(status).json({ error: status < 500 ? String(err.message) : "internal error" });
+  };
+  app.use(onError);
 
   return app;
 }

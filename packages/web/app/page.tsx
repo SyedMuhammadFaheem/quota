@@ -34,7 +34,7 @@ function WorkSessionCard({ session, onResumed }: { session: WorkSession | null; 
         <CardHeader>
           <CardTitle>No active work session</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-neutral-500">
+        <CardContent className="text-sm text-neutral-600 dark:text-neutral-400">
           Start one from the CLI: <code>quota session start &quot;My project&quot;</code>
         </CardContent>
       </Card>
@@ -55,18 +55,18 @@ function WorkSessionCard({ session, onResumed }: { session: WorkSession | null; 
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
         <div>
-          <p className="text-xs uppercase text-neutral-400">You were working on</p>
+          <p className="text-xs uppercase text-neutral-600 dark:text-neutral-400">You were working on</p>
           <p className="text-lg font-semibold">{session.project}</p>
         </div>
         {session.status_text && (
           <div>
-            <p className="text-xs uppercase text-neutral-400">Last state</p>
+            <p className="text-xs uppercase text-neutral-600 dark:text-neutral-400">Last state</p>
             <p>{session.status_text}</p>
           </div>
         )}
         {session.nextTasks.length > 0 && (
           <div>
-            <p className="text-xs uppercase text-neutral-400">Next</p>
+            <p className="text-xs uppercase text-neutral-600 dark:text-neutral-400">Next</p>
             <ol className="list-decimal pl-4">
               {session.nextTasks.map((t, i) => (
                 <li key={i}>{t}</li>
@@ -76,7 +76,7 @@ function WorkSessionCard({ session, onResumed }: { session: WorkSession | null; 
         )}
         {session.notes && (
           <div>
-            <p className="text-xs uppercase text-neutral-400">Notes</p>
+            <p className="text-xs uppercase text-neutral-600 dark:text-neutral-400">Notes</p>
             <p className="whitespace-pre-wrap">{session.notes}</p>
           </div>
         )}
@@ -110,7 +110,7 @@ function UsageCard({ label, usage }: { label: string; usage: StatusResponse["usa
         <CardHeader>
           <CardTitle>{label}</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-neutral-500">
+        <CardContent className="text-sm text-neutral-600 dark:text-neutral-400">
           No data yet — open Claude Code once, or wait for the next background poll.
         </CardContent>
       </Card>
@@ -126,7 +126,7 @@ function UsageCard({ label, usage }: { label: string; usage: StatusResponse["usa
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         <Progress value={pct} />
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
           Resets in {formatCountdown(usage.resetsAt, "resetting now")} · source: {usage.source}
         </p>
       </CardContent>
@@ -172,12 +172,12 @@ export default function Dashboard() {
         <Badge variant={error ? "danger" : "success"}>{error ? "disconnected" : "connected"}</Badge>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       <WorkSessionCard session={status?.session ?? null} onResumed={refresh} />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-neutral-500">Claude availability</h2>
+        <h2 className="text-sm font-medium text-neutral-600 dark:text-neutral-400">Claude availability</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <UsageCard label="5-hour session" usage={status?.usage.five_hour ?? null} />
           <UsageCard label="Weekly" usage={status?.usage.seven_day ?? null} />
@@ -198,7 +198,7 @@ export default function Dashboard() {
           <CardTitle>Task queue ({tasks.length} pending)</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {tasks.length === 0 && <p className="text-sm text-neutral-500">No pending tasks. Add some via `quota tasks add`.</p>}
+          {tasks.length === 0 && <p className="text-sm text-neutral-600 dark:text-neutral-400">No pending tasks. Add some via `quota tasks add`.</p>}
           {tasks.map((t) => (
             <div key={t.id} className="flex items-center justify-between text-sm">
               <span>{t.title}</span>
@@ -213,10 +213,10 @@ export default function Dashboard() {
           <CardTitle>Recent notifications</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {notifications.length === 0 && <p className="text-sm text-neutral-500">None yet.</p>}
+          {notifications.length === 0 && <p className="text-sm text-neutral-600 dark:text-neutral-400">None yet.</p>}
           {notifications.map((n) => (
             <div key={n.id} className="text-sm">
-              <span className="text-neutral-400">{new Date(n.sent_at).toLocaleString()}</span> · {n.channel} · {n.message}
+              <span className="text-neutral-600 dark:text-neutral-400">{new Date(n.sent_at).toLocaleString()}</span> · {n.channel} · {n.message}
             </div>
           ))}
         </CardContent>

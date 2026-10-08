@@ -250,8 +250,14 @@ function buildTasksCommand(): Command {
     .command("add <title>")
     .option("-p, --priority <n>", "priority (higher = more urgent)", "0")
     .action((title, opts) => {
+      const priority = Number(opts.priority);
+      if (!Number.isFinite(priority)) {
+        console.error(`Priority must be a number, got "${opts.priority}".`);
+        process.exitCode = 1;
+        return;
+      }
       const db = openDb();
-      const task = createTask(db, title, Number(opts.priority));
+      const task = createTask(db, title, priority);
       console.log(`Added #${task.id}: ${task.title}`);
       db.close();
     });

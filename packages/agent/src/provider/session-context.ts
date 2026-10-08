@@ -45,7 +45,8 @@ const LIST_ITEM = /^\s*(?:[-*]|\d+[.)])\s*(?:\[[ xX]\]\s*)?(.+)$/;
 
 function stripMarkdown(text: string): string {
   return text
-    .replace(/`{1,3}[^`]*`{1,3}/g, "")
+    .replace(/```[\s\S]*?```/g, "") // fenced code blocks: drop
+    .replace(/`([^`\n]*)`/g, "$1") // inline code: keep the text, it's usually a name the sentence needs
     .replace(/^#{1,6}\s*/gm, "")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/[*_]{1,2}([^*_]+)[*_]{1,2}/g, "$1")

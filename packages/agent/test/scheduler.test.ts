@@ -129,3 +129,40 @@ test("ingest reschedules the alarm when a new resets_at arrives", async () => {
   clock.advanceTo(20_000);
   assert.deepEqual(resets, ["five_hour"]);
 });
+
+test("a past resets_at re-sent or replayed on restart fires its reset only once", async () => {
+  const db = openDb(":memory:");
+  const clock = fakeClock(3_000_000);
+  const resets: string[] = [];
+  const makeScheduler = () =>
+    new Scheduler({
+      db,
+      poll: async () => undefined,
+      onReset: (kind) => resets.push(kind),
+      now: clock.now,
+      setTimeoutFn: clock.setTimeoutFn,
+      clearTimeoutFn: clock.clearTimeoutFn,
+      pollIntervalMs: 999_999_999,
+    });
+  const stale = {
+    capturedAt: clock.now(),
+    source: "statusline" as const,
+    raw: {},
+    windows: [{ kind: "five_hour" as const, utilization: 20, resetsAt: clock.now() - 60_000 }],
+  };
+
+  const first = makeScheduler();
+  first.start();
+  for (let i = 0; i < 3; i++) {
+    first.ingest(stale);
+    clock.advanceTo(clock.now() + 1);
+  }
+  first.stop();
+
+  const restarted = makeScheduler();
+  restarted.start();
+  clock.advanceTo(clock.now() + 1);
+
+  assert.deepEqual(resets, ["five_hour"]);
+  assert.equal(recentResetEvents(db, 10).length, 1);
+});

@@ -53,6 +53,8 @@ async function withRealAgent(fn: (env: NodeJS.ProcessEnv, port: number) => Promi
   const port = freePort();
   const env = { ...process.env, QUOTA_HOME: quotaHome, QUOTA_PORT: String(port) };
   const child = spawn(process.execPath, [BIN], { env, cwd: AGENT_DIR, stdio: "pipe" });
+  // Subscribe at spawn: if the agent crashes on startup, a listener attached later never fires and the test hangs.
+  const exited = new Promise((r) => child.once("exit", r));
   const errChunks: string[] = [];
   child.stderr?.on("data", (d) => errChunks.push(d.toString()));
   try {
@@ -60,7 +62,7 @@ async function withRealAgent(fn: (env: NodeJS.ProcessEnv, port: number) => Promi
     await fn(env, port);
   } finally {
     child.kill("SIGTERM");
-    await new Promise((r) => child.once("exit", r));
+    await exited;
     if (errChunks.length) {
       // surface anything the daemon logged to stderr for debugging, but don't fail the test on it
     }
@@ -228,18 +230,29 @@ test("e2e: state persists across an agent restart (same QUOTA_HOME)", async () =
   const port = freePort();
   const env = { ...process.env, QUOTA_HOME: quotaHome, QUOTA_PORT: String(port) };
 
-  let child = spawn(process.execPath, [BIN], { env, cwd: AGENT_DIR, stdio: "ignore" });
-  await waitForAgent(port);
-  runCli(["session", "start", "Persisted Project"], env);
-  child.kill("SIGTERM");
-  await new Promise((r) => child.once("exit", r));
+  const spawnAgent = () => {
+    const child = spawn(process.execPath, [BIN], { env, cwd: AGENT_DIR, stdio: "ignore" });
+    return { child, exited: new Promise((r) => child.once("exit", r)) };
+  };
 
-  child = spawn(process.execPath, [BIN], { env, cwd: AGENT_DIR, stdio: "ignore" });
-  await waitForAgent(port);
-  const status = runCli(["session", "status"], env);
-  assert.match(status.stdout, /Persisted Project/);
-  child.kill("SIGTERM");
-  await new Promise((r) => child.once("exit", r));
+  let agent = spawnAgent();
+  try {
+    await waitForAgent(port);
+    runCli(["session", "start", "Persisted Project"], env);
+  } finally {
+    agent.child.kill("SIGTERM");
+    await agent.exited;
+  }
+
+  agent = spawnAgent();
+  try {
+    await waitForAgent(port);
+    const status = runCli(["session", "status"], env);
+    assert.match(status.stdout, /Persisted Project/);
+  } finally {
+    agent.child.kill("SIGTERM");
+    await agent.exited;
+  }
 
   fs.rmSync(quotaHome, { recursive: true, force: true });
 });
